@@ -10,7 +10,15 @@ ENV = os.environ.get('GAR_ENV')
 if ENV is None:
     ENV = "DEV"
 
+
 SQLITE_DATABASE      = 'data/data.db'
+
+MYSQL_DB_SERVER = 'localhost'
+MYSQL_DB_PORT = 3306
+MYSQL_DB_USERNAME = 'root'
+MYSQL_DB_PASSWORD = ''
+MYSQL_DB_DBNAME = 'getaroom'
+
 BUIlDING_NAME_LOOKUP = 'data/buildings.json'
 
 # Log files

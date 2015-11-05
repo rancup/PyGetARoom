@@ -6,7 +6,7 @@ import re
 import sqlite3
 import json
 import logging as logger
-
+import MySQLdb as mdb
 import config
 
 # logger.basicConfig(filename=LOGGER_SERVICE,level=logger.DEBUG)
@@ -212,82 +212,89 @@ def get_available_rooms(building_str, in_class_time, sort_weight=True):
 
 # Writes a SQLite database from source_file html table
 def populate(source_file):
-    con = sqlite3.connect(config.SQLITE_DATABASE)
-    building_lookup = json.loads(open(config.BUIlDING_NAME_LOOKUP).read())
+    try:
+        con = mdb.connect(config.MYSQL_DB_SERVER, config.MYSQL_DB_USERNAME, config.MYSQL_DB_PASSWORD, config.MYSQL_DB_DBNAME)
 
-    logger.info("[POP] Loading beautifulsoup file")
-    print "Loading %s..." % source_file,
-    soup = BeautifulSoup(open(source_file, 'r'), "html.parser")
-    print '\033[92m' + "done" + '\033[0m'
-
-    rows = soup.table.tbody.find_all('tr')
-    rows = rows[1:]  # ignore title row
-
-    # Emptying db
-    print "Purging Database"
-    with con:
         cur = con.cursor()
-        sql2 = "DELETE FROM sqlite_sequence WHERE name = ?;"
-        try:
-            cur.execute('DELETE FROM buildings')
-            cur.execute('DELETE FROM times')
-            cur.execute('DELETE FROM rooms')
 
-            cur.execute(sql2, 'buildings')
-            cur.execute(sql2, 'rooms')
-            cur.execute(sql2, 'times')
-        except:
-            pass
-        con.commit()
+        building_lookup = json.loads(open(config.BUIlDING_NAME_LOOKUP).read())
 
-    print "Writing database, this could take a while..."
-    logger.info("[POP] Writing DB...")
-    
-    # Populate buildings
-    with con:
-        cur = con.cursor()
+        logger.info("[POP] Loading beautifulsoup file")
+        print "Loading %s..." % source_file,
+        soup = BeautifulSoup(open(source_file, 'r'), "html.parser")
+        print '\033[92m' + "done" + '\033[0m'
+
+        rows = soup.table.tbody.find_all('tr')
+        rows = rows[1:]  # ignore title row
+
+        # # Emptying db
+        # print "Purging Database"
+        # with con:
+        #     cur = con.cursor()
+        #     sql2 = "DELETE FROM sqlite_sequence WHERE name = ?;"
+        #     try:
+        #         cur.execute('DELETE FROM buildings')
+        #         cur.execute('DELETE FROM times')
+        #         cur.execute('DELETE FROM rooms')
+        #
+        #         cur.execute(sql2, 'buildings')
+        #         cur.execute(sql2, 'rooms')
+        #         cur.execute(sql2, 'times')
+        #     except:
+        #         pass
+        #     con.commit()
+
+        print "Writing database, this could take a while..."
+        logger.info("[POP] Writing DB...")
+
         buildings_dict = building_lookup['buildings']
         for building_code in buildings_dict.iterkeys():
             building_name = buildings_dict[building_code]
 
-            query = "INSERT INTO buildings VALUES(NULL, ?, ?);"
-            try:
+            cmd = "SELECT * FROM building WHERE code = %s"
+            cur.execute(cmd, (building_code,))
+            building_obj = cur.fetchone()
+            if not building_obj:
+                # query = "INSERT INTO building VALUES(NULL, ?, ?);"
+                query = "INSERT INTO building VALUES(NULL, %s, %s);"
+
                 cur.execute(query, (building_code, building_name))
+
                 print "Inserting building: %s - %s" % (building_name, building_code)
-            except:
+            else:
                 print "Building already exists in DB: %s - %s" % (building_name, building_code)
-    con.commit()
+        con.commit()
 
-    for i, row in enumerate(rows):
-        text = row.get_text().encode('ascii', 'ignore')
+        for i, row in enumerate(rows):
+            text = row.get_text().encode('ascii', 'ignore')
 
-        # See if pattern matches
-        # result = re.search(regex, text)
+            # See if pattern matches
+            # result = re.search(regex, text)
 
-        result = regex.search(text)
-        if result is None:
-            continue
+            result = regex.search(text)
+            if result is None:
+                continue
 
-        # Get capture groups
-        days = result.group("days")
-        # building = result.group("building")
-        # room = result.group("room")
-        full_room = result.group("full_room")
-        start_time = result.group("start_time")
-        end_time = result.group("end_time")
+            # Get capture groups
+            days = result.group("days")
+            # building = result.group("building")
+            # room = result.group("room")
+            full_room = result.group("full_room")
+            start_time = result.group("start_time")
+            end_time = result.group("end_time")
 
-        # print(json.dumps(days))
+            # print(json.dumps(days))
 
-        with con:
+
             cur = con.cursor()
 
             # check all bldgs first for match
-            cmd = "SELECT * FROM buildings"
+            cmd = "SELECT * FROM building"
             cur.execute(cmd)
             buildings = cur.fetchall()
             building = ''
             room = ''
-            
+
             for b in buildings:
                 if full_room.startswith(b[1]) and len(b[1]) > len(building):
                     building = b[1]
@@ -300,19 +307,28 @@ def populate(source_file):
 
 
             # Get building id
-            cmd = "SELECT * FROM buildings WHERE code = ?"
+            cmd = "SELECT * FROM building WHERE code = %s"
             cur.execute(cmd, (building,))
             building_obj = cur.fetchone()
             building_id = building_obj[0]
 
             # Insert rooms
-            cur.execute("SELECT * FROM rooms WHERE building_id = '" + str(building_id) + "' AND name = '" + room + "';")
+            cur.execute("SELECT * FROM room WHERE building_id = '" + str(building_id) + "' AND name = '" + room + "';")
             rows = cur.fetchall()
             if len(rows) == 0:
-                cur.execute("INSERT INTO rooms VALUES(NULL, '" + room + "', " + str(building_id) + ");")
+                cmd = "INSERT INTO room VALUES(NULL, NULL, %s, %s);"
+                # print cmd % (room, building_id)
+                cur.execute(cmd, (room, building_id))
                 room_id = cur.lastrowid
             else:
                 room_id = rows[0][0]
+            con.commit()
+
+            cur.execute("SELECT * FROM building_rooms WHERE building_id = %s;", (building_id, ))
+            rows = cur.fetchall()
+            if len(rows) == 0:
+                cur.execute("INSERT INTO building_rooms VALUES(%s, %s);", (building_id, room_id))
+                con.commit()
 
             days = days.replace(" ", "")
             days_list = list(days)
@@ -324,9 +340,15 @@ def populate(source_file):
             time_start_db = time.strftime(TIME_OUT_FORMAT, time_start_struct)
             time_end_db = time.strftime(TIME_OUT_FORMAT, time_end_struct)
 
-            cur.execute("INSERT INTO times VALUES(NULL, '" + str(room_id) + "', '" + str(
-                building_id) + "', '" + time_start_db + "', '" + time_end_db + "', '" + days_string + "');")
-    con.close()
+            cur.execute("INSERT INTO time VALUES(NULL, '" + days_string + "', '" + time_end_db + "', '" + time_start_db + "', '" + str(
+                building_id) + "', '" + str(room_id) + "');")
+
+    except mdb.Error, e:
+        print "Error %d: %s" % (e.args[0],e.args[1])
+        sys.exit(1)
+    finally:
+        if con:
+            con.close()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

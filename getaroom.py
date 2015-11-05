@@ -318,6 +318,7 @@ def populate(source_file):
             if len(rows) == 0:
                 cmd = "INSERT INTO room VALUES(NULL, NULL, %s, %s);"
                 # print cmd % (room, building_id)
+                room = room.strip()
                 cur.execute(cmd, (room, building_id))
                 room_id = cur.lastrowid
             else:
